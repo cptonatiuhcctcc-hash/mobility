@@ -1,0 +1,152 @@
+
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Admin · Elite Mobility Rentas</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <div class="header">
+    <div class="container row">
+      <div class="brand"><div class="logo">🛠</div><div><div style="font-weight:700">Panel de administración</div><div class="hint">Elite Mobility Rentas</div></div></div>
+      <div><a class="btn btn-outline" href="../">Ir al catálogo</a></div>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="grid grid-2 mt-24">
+      <input id="q" class="input" placeholder="Buscar por cliente, vehículo o código">
+      <input id="d" type="date" class="input">
+    </div>
+    <div class="row mt-16"><button class="btn btn-outline" onclick="exportCSV()">Exportar CSV</button><div class="hint">Tip: filtra por fecha para ver qué reservas abarcan ese día.</div></div>
+    <div class="card mt-16"><table class="table"><thead><tr><th>Código</th><th>Cliente</th><th>Vehículo</th><th>Periodo</th><th>Lugar</th><th>Total</th><th>Pago</th><th>Estado</th><th>Contrato</th></tr></thead><tbody id="tbody"></tbody></table></div>
+
+    <h3 class="mt-24">Ajustes de empresa</h3>
+    <div class="grid grid-2 mt-8">
+      <input id="s-company" class="input" placeholder="Nombre legal">
+      <input id="s-logo" class="input" placeholder="Logo URL">
+      <input id="s-rfc" class="input" placeholder="RFC">
+      <input id="s-address" class="input" placeholder="Domicilio">
+      <input id="s-phone" class="input" placeholder="Teléfono">
+      <input id="s-email" class="input" placeholder="Email">
+      <input id="s-deposit" class="input" type="number" placeholder="Depósito (MXN)">
+      <input id="s-fuel" class="input" placeholder="Política de combustible">
+      <input id="s-cancel" class="input" placeholder="Política de cancelación">
+      <textarea id="s-terms" class="input" placeholder="Términos"></textarea>
+    </div>
+    <div class="mt-8"><button class="btn" onclick="saveSettings()">Guardar ajustes</button></div>
+  </div>
+
+  <script src="../assets/app.js"></script>
+  <script>
+  const S=window.Renta, tbody=document.getElementById('tbody'), q=document.getElementById('q'), d=document.getElementById('d');
+  function fmtVeh(v){ return v.brand+' '+v.model+' '+v.year; }
+  function load(){ render(S.getBookings()); loadSettings(); }
+  function render(all){
+    const term=(q.value||'').toLowerCase(), day=d.value;
+    const list = all.filter(b => {
+      const t = term==='' || b.customer.name.toLowerCase().includes(term) || b.customer.phone.includes(term) || b.code.toLowerCase().includes(term) || fmtVeh(b.vehicle).toLowerCase().includes(term);
+      const matchD = !day || (b.filters.start<=day && b.filters.end>=day);
+      return t && matchD;
+    });
+    tbody.innerHTML = list.map(b => \`<tr>
+      <td style="font-family:ui-monospace,monospace;font-size:12px">\${b.code}</td>
+      <td>\${b.customer.name}<div class="hint">\${b.customer.phone} · \${b.customer.email}</div></td>
+      <td>\${fmtVeh(b.vehicle)}</td>
+      <td class="hint">\${b.filters.start} → \${b.filters.end}</td>
+      <td class="hint">\${b.filters.location||'—'}</td>
+      <td style="text-align:right;font-weight:700">\${S.currency(b.pricing.totalConDeposito)}</td>
+      <td class="hint">\${b.payment.method} <span class="status \${b.payment.status==='Pagado'?'paid':'pending'}">\${b.payment.status}</span></td>
+      <td>
+        <select onchange="updateStatus('\${b.id}', this.value)">
+          <option \${b.status==='Confirmada'?'selected':''}>Confirmada</option>
+          <option \${b.status==='Entregada'?'selected':''}>Entregada</option>
+          <option \${b.status==='Cerrada'?'selected':''}>Cerrada</option>
+          <option \${b.status==='Cancelada'?'selected':''}>Cancelada</option>
+        </select>
+      </td>
+      <td><a class="link" href="#" onclick="openContract('\${b.id}')">Contrato</a></td>
+    </tr>\`).join('');
+  }
+  function updateStatus(id,status){ const arr=S.getBookings().map(b=>b.id===id?{...b,status}:b); S.setBookings(arr); render(arr); }
+  function exportCSV(){
+    const arr = S.getBookings();
+    const headers = ["codigo","nombre","telefono","email","licencia","vehiculo","inicio","fin","lugar","dias","subtotal","iva","total","deposito","total_con_deposito","pago_metodo","pago_status","pago_txn","status"];
+    const rows = arr.map(b => [b.code,b.customer.name,b.customer.phone,b.customer.email,b.customer.license,fmtVeh(b.vehicle),b.filters.start,b.filters.end,b.filters.location,b.pricing.days,b.pricing.subtotal,b.pricing.iva,b.pricing.total,b.pricing.deposit,b.pricing.totalConDeposito,b.payment.method,b.payment.status,b.payment.txn||'',b.status]);
+    const csv = [headers,...rows].map(r=>r.map(x=>`"${(x??'').toString().replaceAll('"','\"')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href=url; a.download='reservas.csv'; a.click(); URL.revokeObjectURL(url);
+  }
+  function loadSettings(){
+    const s=S.getSettings();
+    document.getElementById('s-company').value=s.companyName;
+    document.getElementById('s-logo').value=s.logoUrl||'';
+    document.getElementById('s-rfc').value=s.rfc||'';
+    document.getElementById('s-address').value=s.address||'';
+    document.getElementById('s-phone').value=s.phone||'';
+    document.getElementById('s-email').value=s.email||'';
+    document.getElementById('s-deposit').value=s.depositDefault||0;
+    document.getElementById('s-fuel').value=s.fuelPolicy;
+    document.getElementById('s-cancel').value=s.cancellationPolicy;
+    document.getElementById('s-terms').value=s.terms;
+  }
+  function saveSettings(){
+    const s={
+      companyName:document.getElementById('s-company').value||'Elite Mobility Rentas',
+      logoUrl:document.getElementById('s-logo').value,
+      rfc:document.getElementById('s-rfc').value,
+      address:document.getElementById('s-address').value,
+      phone:document.getElementById('s-phone').value,
+      email:document.getElementById('s-email').value,
+      depositDefault:Number(document.getElementById('s-deposit').value)||0,
+      fuelPolicy:document.getElementById('s-fuel').value,
+      cancellationPolicy:document.getElementById('s-cancel').value,
+      terms:document.getElementById('s-terms').value
+    };
+    S.setSettings(s); alert('Ajustes guardados');
+  }
+  function openContract(id){
+    const b=S.getBookings().find(x=>x.id===id), s=S.getSettings();
+    const w=window.open('','_blank');
+    const logo=s.logoUrl? '<img src="'+s.logoUrl+'" style="height:40px">' : '🚗';
+    const html = `<!doctype html><html><head><meta charset='utf-8'><title>Contrato ${b.code}</title>
+    <style>body{font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Noto Sans,sans-serif;line-height:1.35;padding:28px;color:#0a0a0a}
+    h1{font-size:18px;margin:0} h2{font-size:14px;margin:18px 0 6px} table{width:100%;border-collapse:collapse}
+    td,th{border:1px solid #ddd;padding:6px;font-size:12px} .muted{color:#666;font-size:12px}</style></head><body>
+      <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;'>
+        <div style='display:flex;align-items:center;gap:10px;'>${logo}<div><h1>${s.companyName}</h1><div class='muted'>RFC: ${s.rfc||'—'} · ${s.address||'—'} · ${s.phone||'—'} · ${s.email||'—'}</div></div></div>
+        <div class='muted'>Folio: <strong>${b.code}</strong></div>
+      </div>
+      <h2>Datos del cliente</h2>
+      <table><tr><th>Nombre</th><th>Teléfono</th><th>Email</th><th>Licencia</th></tr>
+      <tr><td>${b.customer.name}</td><td>${b.customer.phone}</td><td>${b.customer.email}</td><td>${b.customer.license}</td></tr></table>
+      <h2>Vehículo y renta</h2>
+      <table><tr><th>Vehículo</th><th>Periodo</th><th>Lugar</th><th>Días</th></tr>
+      <tr><td>${b.vehicle.brand} ${b.vehicle.model} ${b.vehicle.year}</td><td>${b.filters.start} → ${b.filters.end}</td><td>${b.filters.location||'—'}</td><td>${b.pricing.days}</td></tr></table>
+      <h2>Importes</h2>
+      <table><tr><th>Subtotal</th><th>IVA (16%)</th><th>Depósito</th><th>Total</th><th>Total con depósito</th></tr>
+      <tr><td>${S.currency(b.pricing.subtotal)}</td><td>${S.currency(b.pricing.iva)}</td><td>${S.currency(b.pricing.deposit)}</td><td>${S.currency(b.pricing.total)}</td><td>${S.currency(b.pricing.totalConDeposito)}</td></tr></table>
+      <h2>Pago</h2>
+      <table><tr><th>Método</th><th>Estado</th><th>Folio</th></tr>
+      <tr><td>${b.payment.method}</td><td>${b.payment.status}</td><td>${b.payment.txn||'—'}</td></tr></table>
+      <h2>Términos</h2>
+      <div class='muted'>${s.terms}<br>Política de combustible: ${s.fuelPolicy}. ${s.cancellationPolicy}</div>
+      <p class='muted'>Fecha de emisión: ${(new Date()).toLocaleDateString()}</p>
+      <div style='height:90px'></div>
+      <div style='display:flex;gap:40px;margin-top:40px;'>
+        <div style='flex:1;text-align:center'>______________________________<br>${s.companyName}</div>
+        <div style='flex:1;text-align:center'>______________________________<br>${b.customer.name}</div>
+      </div>
+      <script>window.print()</script>
+    </body></html>`;
+    w.document.write(html); w.document.close();
+  }
+  q.addEventListener('input',()=>render(S.getBookings()));
+  d.addEventListener('input',()=>render(S.getBookings()));
+  load();
+  </script>
+</body>
+</html>
