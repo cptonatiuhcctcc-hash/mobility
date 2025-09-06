@@ -1,0 +1,267 @@
+
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Elite Mobility Rentas</title>
+  <link rel="stylesheet" href="/assets/style.css">
+  <link rel="manifest" href="/manifest.webmanifest">
+</head>
+<body>
+  <div class="header">
+    <div class="container row">
+      <div class="brand">
+        <div class="logo">🚗</div>
+        <div>
+          <div style="font-weight:700">Elite Mobility Rentas</div>
+          <div class="hint">Renta de vehículos y transporte ejecutivo</div>
+        </div>
+      </div>
+      <div class="row" style="gap:8px">
+        <a class="btn btn-outline" href="/admin/">Admin</a>
+        <button class="btn" id="printBtn" onclick="window.print()">Imprimir</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="banner mt-16">Selecciona fechas para ver precios totales. Depósito reembolsable incluido en el resumen.</div>
+
+    <div class="grid grid-3 mt-16 card p-16">
+      <div>
+        <div class="hint">Lugar de entrega</div>
+        <input class="input" id="f-location" placeholder="CDMX, Toluca, Guadalajara…">
+      </div>
+      <div>
+        <div class="hint">Inicio</div>
+        <input type="date" class="input" id="f-start">
+      </div>
+      <div>
+        <div class="hint">Fin</div>
+        <input type="date" class="input" id="f-end">
+      </div>
+      <div>
+        <div class="hint">Tipo</div>
+        <select class="input" id="f-type">
+          <option value="">Todos</option>
+          <option>Compacto</option><option>Sedán</option><option>SUV</option><option>Pickup</option><option>Van</option>
+        </select>
+      </div>
+      <div>
+        <div class="hint">Plazas mín.</div>
+        <input type="number" min="1" class="input" id="f-seats" placeholder="5">
+      </div>
+      <div style="align-self:end"><button class="btn btn-outline" id="clear">Limpiar</button></div>
+    </div>
+
+    <div class="mt-24">
+      <div class="row"><h2>Disponibles</h2><div class="hint" id="daysLabel">📅 0 días</div></div>
+      <p class="muted">Tarifas por día, IVA no incluido</p>
+      <div class="grid grid-3 mt-16" id="grid"></div>
+    </div>
+  </div>
+
+  <!-- Modal -->
+  <div class="modal" id="modal" style="display:none">
+    <div class="box">
+      <div class="row">
+        <h3 id="m-title">Reserva</h3>
+        <button class="btn btn-outline" onclick="closeModal()">Cerrar</button>
+      </div>
+      <div id="m-body"></div>
+    </div>
+  </div>
+
+  <script src="/assets/app.js"></script>
+  <script>
+  const S = window.Renta;
+  const state = {
+    filters: { location:'', start:'', end:'', type:'', seats:'' },
+    vehicles: S.DEFAULT_VEHICLES.slice(),
+    settings: S.getSettings(),
+    selection: null,
+    extras: {},
+    payment: { method: 'Transferencia', status: 'Pendiente', txn: '' },
+    customer: { name:'', phone:'', email:'', license:'' }
+  };
+
+  // UI Bindings
+  const el = (id)=>document.getElementById(id);
+  const grid = el('grid');
+
+  function loadFilters(){
+    const saved = JSON.parse(localStorage.getItem('renta.filters')||'null') || state.filters;
+    state.filters = saved;
+    el('f-location').value = saved.location||'';
+    el('f-start').value = saved.start||'';
+    el('f-end').value = saved.end||'';
+    el('f-type').value = saved.type||'';
+    el('f-seats').value = saved.seats||'';
+  }
+  function saveFilters(){
+    localStorage.setItem('renta.filters', JSON.stringify(state.filters));
+  }
+
+  ['f-location','f-start','f-end','f-type','f-seats'].forEach(id=>{
+    el(id).addEventListener('input',()=>{
+      state.filters.location = el('f-location').value;
+      state.filters.start = el('f-start').value;
+      state.filters.end = el('f-end').value;
+      state.filters.type = el('f-type').value;
+      state.filters.seats = el('f-seats').value;
+      saveFilters();
+      render();
+    });
+  });
+  el('clear').addEventListener('click',()=>{
+    state.filters = { location:'', start:'', end:'', type:'', seats:'' };
+    saveFilters(); loadFilters(); render();
+  });
+
+  function days(){
+    const d = S.diffDays(state.filters.start, state.filters.end);
+    el('daysLabel').textContent = '📅 ' + d + ' ' + (d===1?'día':'días');
+    return d;
+  }
+
+  function render(){
+    const d = days();
+    const filtered = state.vehicles.filter(v => {
+      const byT = !state.filters.type || v.type === state.filters.type;
+      const byS = !state.filters.seats || v.seats >= Number(state.filters.seats);
+      return byT && byS;
+    });
+    grid.innerHTML = '';
+    filtered.forEach(v => {
+      const card = document.createElement('article');
+      card.className='card';
+      card.innerHTML = \`
+        <img src="\${v.img}" alt="vehículo">
+        <div class="p-16">
+          <div class="row">
+            <div>
+              <div style="font-weight:700">\${v.brand} \${v.model} <span class="muted">\${v.year}</span></div>
+              <div class="muted">Hasta \${v.seats} plazas</div>
+            </div>
+            <div style="text-align:right">
+              <div style="font-weight:700;font-size:18px">\${S.currency(v.pricePerDay)}</div>
+              <div class="hint">/ día</div>
+            </div>
+          </div>
+          \${d>0? \`<div class="total mt-16"><span>Total \${d} \${d===1?'día':'días'}</span><strong>\${S.currency(d * v.pricePerDay)}</strong></div>\` : '<p class="muted mt-16">Selecciona fechas para ver el total.</p>'}
+          <div class="row mt-16">
+            <button class="btn btn-outline" onclick="alert('Ficha técnica (demo)')">Detalles</button>
+            <button class="btn" onclick='startBooking("\${v.id}")'>Reservar</button>
+          </div>
+        </div>\`;
+      grid.appendChild(card);
+    });
+  }
+
+  function startBooking(id){
+    const v = state.vehicles.find(x=>x.id===id);
+    const d = days();
+    if(!state.filters.start || !state.filters.end || d<=0){ alert('Selecciona fechas válidas.'); return; }
+    state.selection = v; state.extras = {}; state.customer={name:'',phone:'',email:'',license:''}; state.payment={method:'Transferencia',status:'Pendiente',txn:''};
+    openModal(renderBooking());
+  }
+
+  function toggleExtra(id){ state.extras[id] = !state.extras[id]; openModal(renderBooking()); }
+  function setPaymentMethod(m){ state.payment.method = m; openModal(renderBooking()); }
+  function payNow(){
+    const tx = 'TX-' + Date.now().toString().slice(-6) + '-' + S.uid().slice(0,4).toUpperCase();
+    state.payment.status='Pagado'; state.payment.txn=tx; alert('Pago aprobado (demo)\nFolio: '+tx); openModal(renderBooking());
+  }
+  function confirmBooking(){
+    const c = state.customer;
+    if(!c.name || !c.phone || !c.email || !c.license){ alert('Completa los datos del cliente.'); return; }
+    const d = days(); const v = state.selection;
+    const baseTotal = d * v.pricePerDay;
+    let extrasTotal = 0;
+    S.EXTRA_CATALOG.forEach(x=>{ if(state.extras[x.id]) extrasTotal += x.pricePerDay ? (d||1)*x.pricePerDay : (x.priceFlat||0) });
+    const subtotal = baseTotal + extrasTotal, iva = subtotal*0.16, total=subtotal+iva, deposit=(S.getSettings().depositDefault||0), totalConDeposito=total+deposit;
+    const booking = {
+      id:S.uid(), code:'RB-'+Date.now().toString().slice(-6)+'-'+S.uid().slice(0,3).toUpperCase(),
+      vehicle:v, filters:state.filters, extras:state.extras,
+      pricing:{ days:d, baseTotal, extrasTotal, subtotal, iva, total, deposit, totalConDeposito },
+      customer:state.customer, payment:state.payment, status:'Confirmada', createdAt:new Date().toISOString()
+    };
+    const arr = S.getBookings(); arr.push(booking); S.setBookings(arr);
+    closeModal(); alert('¡Reserva creada! Código: '+booking.code);
+  }
+
+  function renderBooking(){
+    const d = days(), v = state.selection, s = S.getSettings();
+    const baseTotal = d * v.pricePerDay;
+    let extrasTotal = 0;
+    S.EXTRA_CATALOG.forEach(x=>{ if(state.extras[x.id]) extrasTotal += x.pricePerDay ? (d||1)*x.pricePerDay : (x.priceFlat||0) });
+    const subtotal = baseTotal + extrasTotal, iva = subtotal*0.16, total=subtotal+iva, deposit=(s.depositDefault||0), totalConDeposito=total+deposit;
+    document.getElementById('m-title').textContent = v.brand+' '+v.model+' '+v.year;
+    return \`
+      <div class="grid grid-2">
+        <div>
+          <img src="\${v.img}" style="width:100%;border-radius:14px;aspect-ratio:16/9;object-fit:cover">
+          <div class="mt-16">
+            <div class="hint">Extras</div>
+            <div class="grid grid-2 mt-8">
+              \${S.EXTRA_CATALOG.map(x=>\`
+                <label class="row card p-16" style="align-items:center">
+                  <div><input type="checkbox" \${state.extras[x.id]?'checked':''} onchange="toggleExtra('\${x.id}')"> \${x.name}</div>
+                  <div class="muted">\${x.pricePerDay? S.currency(x.pricePerDay)+ ' / día' : S.currency(x.priceFlat)}</div>
+                </label>\`).join('')}
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="grid grid-2">
+            <div><div class="hint">Inicio</div><input type="date" class="input" value="\${state.filters.start}" onchange="document.getElementById('f-start').value=this.value; state.filters.start=this.value; localStorage.setItem('renta.filters', JSON.stringify(state.filters)); openModal(renderBooking());"></div>
+            <div><div class="hint">Fin</div><input type="date" class="input" value="\${state.filters.end}" onchange="document.getElementById('f-end').value=this.value; state.filters.end=this.value; localStorage.setItem('renta.filters', JSON.stringify(state.filters)); openModal(renderBooking());"></div>
+            <div><div class="hint">Entrega en</div><input class="input" value="\${state.filters.location}" onchange="document.getElementById('f-location').value=this.value; state.filters.location=this.value; localStorage.setItem('renta.filters', JSON.stringify(state.filters));"></div>
+          </div>
+          <div class="mt-16">
+            <div class="hint">Datos del cliente</div>
+            <div class="grid">
+              <input class="input" placeholder="Nombre completo" value="\${state.customer.name}" oninput="state.customer.name=this.value">
+              <input class="input" placeholder="WhatsApp / Teléfono" value="\${state.customer.phone}" oninput="state.customer.phone=this.value">
+              <input class="input" placeholder="Correo electrónico" value="\${state.customer.email}" oninput="state.customer.email=this.value">
+              <input class="input" placeholder="No. de licencia" value="\${state.customer.license}" oninput="state.customer.license=this.value">
+            </div>
+          </div>
+          <div class="mt-16">
+            <div class="hint">Pago</div>
+            <div class="row card p-16">
+              <select class="input" onchange="setPaymentMethod(this.value)" style="max-width:200px">
+                <option \${state.payment.method==='Transferencia'?'selected':''}>Transferencia</option>
+                <option \${state.payment.method==='Tarjeta'?'selected':''}>Tarjeta</option>
+                <option \${state.payment.method==='Efectivo'?'selected':''}>Efectivo</option>
+              </select>
+              <span class="status \${state.payment.status==='Pagado'?'paid':'pending'}">\${state.payment.status}</span>
+            </div>
+            \${state.payment.method==='Tarjeta' && state.payment.status!=='Pagado' ? '<button class="btn mt-8" onclick="payNow()">Pagar ahora (demo)</button>' : ''}
+            \${state.payment.txn? '<div class="hint mt-8">Folio: '+state.payment.txn+'</div>':''}
+            \${state.payment.method==='Transferencia' ? '<div class="hint mt-8">CLABE: 012-345-678901234567 · Beneficiario: '+s.companyName+' · Concepto: Renta '+v.brand+' '+v.model+' ('+state.filters.start+' → '+state.filters.end+')</div>' : ''}
+          </div>
+          <div class="mt-16 card p-16">
+            <div class="row"><span>Base</span><strong>\${S.currency(baseTotal)}</strong></div>
+            <div class="row"><span>Extras</span><strong>\${S.currency(extrasTotal)}</strong></div>
+            <div class="row"><span>Subtotal</span><strong>\${S.currency(subtotal)}</strong></div>
+            <div class="row"><span>IVA (16%)</span><strong>\${S.currency(iva)}</strong></div>
+            <div class="row"><span>Depósito reembolsable</span><strong>\${S.currency(deposit)}</strong></div>
+            <div class="row" style="font-size:18px"><span>Total</span><strong>\${S.currency(total)}</strong></div>
+            <div class="row" style="font-size:18px"><span>Total con depósito</span><strong>\${S.currency(totalConDeposito)}</strong></div>
+          </div>
+          <div class="footer-note mt-8">Política de combustible: \${s.fuelPolicy}. \${s.cancellationPolicy}</div>
+          <div class="row mt-16"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn" onclick="confirmBooking()">Confirmar reserva</button></div>
+        </div>
+      </div>\`;
+  }
+
+  function openModal(html){ document.getElementById('m-body').innerHTML = html; document.getElementById('modal').style.display='grid'; }
+  function closeModal(){ document.getElementById('modal').style.display='none'; }
+
+  // Init
+  loadFilters(); render();
+  </script>
+</body>
+</html>
